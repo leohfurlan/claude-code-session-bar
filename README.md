@@ -109,8 +109,8 @@ Precisa de Python 3.9+ (o instalador oficial do [python.org](https://www.python.
 já traz o tkinter). **Não precisa de administrador.**
 
 ```powershell
-git clone https://github.com/leohfurlan/use-token-session-bar.git
-cd use-token-session-bar
+git clone https://github.com/leohfurlan/claude-code-session-bar.git
+cd claude-code-session-bar
 
 py -m venv .venv
 .venv\Scripts\activate
