@@ -26,7 +26,14 @@ except ImportError as exc:  # pragma: no cover - depende da instalacao
 
 from ..config import Config
 from ..models import Level, State, UsageSnapshot, format_duration, level_for
-from ..winapi import IS_WINDOWS, enable_dpi_awareness, make_tool_window, work_area
+from ..winapi import (
+    IS_WINDOWS,
+    enable_dpi_awareness,
+    is_topmost,
+    make_tool_window,
+    set_topmost,
+    work_area,
+)
 from .taskbar_embed import try_embed, undo_embed
 
 
@@ -124,12 +131,34 @@ class UsageBar:
                 self._place_window()
 
     def show(self) -> None:
+        # Ordem importa: mexer no ex-style de uma janela ja mapeada derruba ela
+        # da faixa topmost. Estiliza primeiro, mapeia depois, topmost por ultimo.
+        self.root.update_idletasks()  # garante que o HWND ja exista
+        self._apply_window_styles()
         self.root.deiconify()
         self.root.attributes("-topmost", True)
-        # update_idletasks garante que o HWND ja exista antes de estiliza-lo.
-        self.root.update_idletasks()
-        self._apply_window_styles()
+        self._reassert_topmost()
         self.config.set("bar.visible", True)
+
+    def _reassert_topmost(self) -> None:
+        """Recoloca a barra no topo se algum app a tiver empurrado pra tras.
+
+        Janela `overrideredirect` no Windows perde o topmost quando outro
+        processo assume o foreground — jogo em tela cheia, UAC, troca de
+        aplicativo. So o atributo do tk nao segura; e preciso reafirmar.
+        """
+        if self._embedded or not IS_WINDOWS or not self.visible:
+            return
+        try:
+            hwnd = int(self.root.winfo_id())
+        except Exception:
+            return
+        if not is_topmost(hwnd):
+            try:
+                self.root.attributes("-topmost", True)
+            except tk.TclError:
+                pass
+        set_topmost(hwnd)
 
     def hide(self) -> None:
         if self._embedded:
@@ -258,9 +287,17 @@ class UsageBar:
         thread principal. Por isso a UI puxa o estado em vez de receber push.
         """
 
+        # A cada ~3s conferimos o topmost. E uma leitura de flag mais, no pior
+        # caso, um SetWindowPos: barato o bastante pra rodar pra sempre.
+        ticks_per_check = max(1, 3000 // max(1, interval_ms))
+        counter = {"n": 0}
+
         def tick() -> None:
             try:
                 self.render(getter())
+                counter["n"] += 1
+                if counter["n"] % ticks_per_check == 0:
+                    self._reassert_topmost()
             except Exception:
                 pass
             self.root.after(interval_ms, tick)

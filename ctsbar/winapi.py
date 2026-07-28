@@ -17,9 +17,14 @@ SPI_GETWORKAREA = 0x0030
 GWL_EXSTYLE = -20
 WS_EX_TOOLWINDOW = 0x00000080
 WS_EX_NOACTIVATE = 0x08000000
-SWP_NOACTIVATE = 0x0010
+WS_EX_TOPMOST = 0x00000008
+SWP_NOSIZE = 0x0001
+SWP_NOMOVE = 0x0002
 SWP_NOZORDER = 0x0004
+SWP_NOACTIVATE = 0x0010
+SWP_FRAMECHANGED = 0x0020
 SWP_SHOWWINDOW = 0x0040
+HWND_TOPMOST = -1
 
 
 class RECT(ctypes.Structure):
@@ -113,16 +118,50 @@ def get_window_rect(hwnd: int) -> Optional[Tuple[int, int, int, int]]:
 
 
 def make_tool_window(hwnd: int) -> bool:
-    """Tira a janela do Alt+Tab e impede que ela roube o foco."""
+    """Tira a janela do Alt+Tab e impede que ela roube o foco.
+
+    O SetWindowPos com SWP_FRAMECHANGED no fim nao e opcional: sem ele o
+    Windows nao aplica a mudanca de ex-style, e a janela ainda por cima cai
+    da faixa topmost.
+    """
     if not IS_WINDOWS:
         return False
     try:
         user32 = ctypes.windll.user32
         style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
         user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE)
+        user32.SetWindowPos(
+            hwnd, 0, 0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+        )
         return True
     except Exception:
         return False
+
+
+def set_topmost(hwnd: int) -> bool:
+    """Recoloca a janela no topo da pilha, sem mover, redimensionar nem focar."""
+    if not IS_WINDOWS:
+        return False
+    try:
+        return bool(
+            ctypes.windll.user32.SetWindowPos(
+                hwnd, HWND_TOPMOST, 0, 0, 0, 0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+            )
+        )
+    except Exception:
+        return False
+
+
+def is_topmost(hwnd: int) -> bool:
+    if not IS_WINDOWS:
+        return False
+    try:
+        style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+    except Exception:
+        return False
+    return bool(style & WS_EX_TOPMOST)
 
 
 def set_parent(child: int, parent: int) -> bool:

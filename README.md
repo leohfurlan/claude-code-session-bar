@@ -311,6 +311,11 @@ tem `claudeAiOauth.accessToken`. Rode `claude` uma vez e faça login. Se você u
 ele renova sozinho e a barra volta ao normal no ciclo seguinte. A barra não
 mexe nas suas credenciais.
 
+**A barra some ao trocar de aplicativo** — era um bug, corrigido. Se ainda
+acontecer, atualize (`git pull`) e reinicie. Uma janela sem borda no Windows
+perde o "sempre no topo" quando outro processo assume o foreground; a barra
+agora reafirma esse estado a cada 3 s.
+
 **A barra some ao mostrar a área de trabalho** — sintoma do `taskbar_embed`.
 Deixe em `false`.
 
