@@ -365,6 +365,19 @@ def test_falhas_seguidas_aumentam_o_recuo():
     assert monitor._api_interval() == 40
 
 
+def test_o_recuo_precisa_de_fato_recuar():
+    """Com o teto igual ao intervalo base, o recuo seria um no-op."""
+    from ctsbar.monitor import API_MAX_BACKOFF
+
+    padrao = Config().get("api.interval_seconds")
+    assert API_MAX_BACKOFF > padrao
+
+    monitor = _monitor_com_api(_FakeApi("erro"))
+    assert monitor._api_interval() == padrao
+    monitor._api_failures = 1
+    assert monitor._api_interval() > padrao
+
+
 def test_cache_expira_e_nao_engana():
     from ctsbar.models import UsageSnapshot
 
@@ -375,7 +388,7 @@ def test_cache_expira_e_nao_engana():
         primary=LimitWindow("five_hour", 34.0, resets_at=time.time() + 3600),
         captured_at=time.time() - 3600,  # bem velho
     )
-    assert monitor._cached_api(time.time()) is None
+    assert monitor._cached_api(time.time(), None) is None
 
 
 def test_cache_e_descartado_quando_a_janela_vira():
@@ -387,7 +400,39 @@ def test_cache_e_descartado_quando_a_janela_vira():
         source="api",
         primary=LimitWindow("five_hour", 93.0, resets_at=time.time() - 1),
     )
-    assert monitor._cached_api(time.time()) is None
+    assert monitor._cached_api(time.time(), None) is None
+
+
+def test_percentual_sobrevive_a_reinicio_do_app(tmp_path, monkeypatch):
+    """Reiniciar não pode voltar a mostrar tokens enquanto a API não libera."""
+    monkeypatch.setattr("ctsbar.monitor.last_usage_path", lambda: tmp_path / "last.json")
+
+    primeiro = _monitor_com_api(_FakeApi(34.0))
+    assert primeiro.poll().percent == 34.0
+
+    # Processo novo: a API so devolve 429 daqui pra frente.
+    segundo = _monitor_com_api(_FakeApi("API respondeu 429 (limite atingido)"))
+    depois = segundo.poll()
+    assert depois.percent == 34.0
+    assert depois.source == "api"
+
+
+def test_cache_velho_vale_enquanto_nao_houve_uso_novo():
+    from ctsbar.models import UsageSnapshot
+
+    monitor = _monitor_com_api(_FakeApi())
+    monitor._last_api = UsageSnapshot(
+        state=State.OK,
+        source="api",
+        primary=LimitWindow("five_hour", 34.0, resets_at=time.time() + 3600),
+        captured_at=time.time() - 25 * 60,  # alem do periodo curto
+    )
+    monitor._activity_at_capture = 1000
+
+    # Mesma atividade -> o percentual nao teria como ter mudado.
+    assert monitor._cached_api(time.time(), 1000).percent == 34.0
+    # Uso novo -> o valor guardado nao vale mais.
+    assert monitor._cached_api(time.time(), 1500) is None
 
 
 def test_cache_avisa_a_idade_do_valor():
@@ -400,7 +445,7 @@ def test_cache_avisa_a_idade_do_valor():
         primary=LimitWindow("five_hour", 34.0, resets_at=time.time() + 3600),
         captured_at=time.time() - 240,
     )
-    assert "atras" in monitor._cached_api(time.time()).detail
+    assert "atras" in monitor._cached_api(time.time(), None).detail
 
 
 def test_janela_vencida_zera_o_percentual():

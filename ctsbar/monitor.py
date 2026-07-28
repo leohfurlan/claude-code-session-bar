@@ -7,22 +7,28 @@ a barra nunca fica sem resposta e o processo nunca morre.
 
 from __future__ import annotations
 
+import json
 import threading
 import time
 from dataclasses import replace
 from typing import Callable, List, Optional
 
 from .config import Config
-from .models import State, UsageSnapshot, format_duration
+from .models import LimitWindow, State, UsageSnapshot, format_duration
+from .paths import last_usage_path
 from .sources import ApiUsageSource, TranscriptUsageSource
 
-# Quanto tempo um percentual da API continua valendo depois que ela para de
-# responder. Um numero de alguns minutos atras ainda diz muito mais sobre o
-# limite do que uma contagem de tokens.
-API_CACHE_MAX_AGE = 10 * 60
+# Um percentual da API vale sempre nos primeiros minutos.
+API_CACHE_SOFT_AGE = 10 * 60
 
-# Teto do recuo entre tentativas quando a API falha em sequencia.
-API_MAX_BACKOFF = 5 * 60
+# Depois disso ele so continua valendo enquanto os transcripts locais nao
+# acusarem uso novo — sem uso, `utilization` nao teria como ter mudado. O teto
+# duro existe porque uso em outra maquina ou no claude.ai tambem conta.
+API_CACHE_HARD_AGE = 60 * 60
+
+# Teto do recuo entre tentativas. Precisa ser bem maior que
+# api.interval_seconds, senao o recuo nao recua nada.
+API_MAX_BACKOFF = 30 * 60
 
 
 class UsageMonitor:
@@ -38,7 +44,9 @@ class UsageMonitor:
         self._last_api_attempt = 0.0
         self._api_failures = 0
         self._last_activity: Optional[int] = None
+        self._activity_at_capture: Optional[int] = None
         self._lock = threading.Lock()
+        self._load_last_api()
         self._wake = threading.Event()
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
@@ -120,24 +128,101 @@ class UsageMonitor:
         floor = self._setting("api.min_interval_seconds", 60)
         return new_activity and self._api_failures == 0 and elapsed >= floor
 
-    def _cached_api(self, now: float) -> Optional[UsageSnapshot]:
-        """Ultimo percentual bom, enquanto a API nao responde de novo."""
+    def _cached_api(self, now: float, activity: Optional[int]) -> Optional[UsageSnapshot]:
+        """Ultimo percentual bom, enquanto a API nao responde de novo.
+
+        Vale sempre nos primeiros minutos. Passado isso, so continua valendo
+        se nao houve uso novo desde a captura: sem uso, o percentual nao teria
+        como ter mudado.
+        """
         cached = self._last_api
         if cached is None or cached.primary is None:
             return None
 
         age = now - cached.captured_at
-        if age > API_CACHE_MAX_AGE:
+        if age > API_CACHE_HARD_AGE:
             return None
         # Se a janela virou, o numero guardado nao vale mais nada.
         if cached.primary.is_expired(now):
             return None
+        if age > API_CACHE_SOFT_AGE and activity is not None:
+            if self._activity_at_capture is None or activity != self._activity_at_capture:
+                return None
 
         detail = cached.detail
         if age >= 90:
             suffix = f"valor de {format_duration(age)} atras"
             detail = f"{detail} · {suffix}" if detail else suffix
         return replace(cached, detail=detail)
+
+    # ------------------------------------------------------- cache em disco
+
+    def _load_last_api(self) -> None:
+        """Recupera o ultimo percentual bom gravado por uma execucao anterior."""
+        try:
+            raw = json.loads(last_usage_path().read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return
+        if not isinstance(raw, dict):
+            return
+
+        try:
+            captured_at = float(raw["captured_at"])
+            windows = {
+                key: LimitWindow(
+                    key=key,
+                    percent=None if value.get("percent") is None else float(value["percent"]),
+                    resets_at=(
+                        None if value.get("resets_at") is None else float(value["resets_at"])
+                    ),
+                )
+                for key, value in raw["windows"].items()
+                if isinstance(value, dict)
+            }
+            primary = windows.get(raw["primary"])
+        except (KeyError, TypeError, ValueError, AttributeError):
+            return
+
+        if primary is None:
+            return
+
+        activity = raw.get("activity")
+        self._activity_at_capture = activity if isinstance(activity, int) else None
+        self._last_api = UsageSnapshot(
+            state=State.OK,
+            source="api",
+            primary=primary,
+            windows=windows,
+            captured_at=captured_at,
+        )
+
+    def _save_last_api(self, snapshot: UsageSnapshot, activity: Optional[int]) -> None:
+        if snapshot.primary is None:
+            return
+
+        # A primaria entra sempre, mesmo que `windows` venha vazio: sem ela o
+        # arquivo nao teria como ser recarregado.
+        windows = dict(snapshot.windows)
+        windows.setdefault(snapshot.primary.key, snapshot.primary)
+
+        try:
+            last_usage_path().parent.mkdir(parents=True, exist_ok=True)
+            last_usage_path().write_text(
+                json.dumps(
+                    {
+                        "captured_at": snapshot.captured_at,
+                        "primary": snapshot.primary.key,
+                        "activity": activity,
+                        "windows": {
+                            key: {"percent": window.percent, "resets_at": window.resets_at}
+                            for key, window in windows.items()
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+        except OSError:
+            pass
 
     def poll(self) -> UsageSnapshot:
         """Um ciclo de leitura. Nunca levanta excecao."""
@@ -156,13 +241,15 @@ class UsageMonitor:
             if snapshot.state is State.OK and snapshot.primary is not None:
                 self._api_failures = 0
                 self._last_activity = activity
+                self._activity_at_capture = activity
                 self._last_api = replace(snapshot, captured_at=now)
+                self._save_last_api(self._last_api, activity)
                 return self._expire_if_stale(self._last_api)
             self._api_failures += 1
             if snapshot.detail:
                 notes.append(snapshot.detail)
 
-        cached = self._cached_api(now)
+        cached = self._cached_api(now, activity)
         if cached is not None:
             return cached
 

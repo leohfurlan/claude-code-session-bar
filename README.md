@@ -256,11 +256,28 @@ a cada ciclo devolve `HTTP 429` e nenhum dado. Então:
 - quando os transcripts acusam **uso novo**, a consulta é antecipada,
   respeitando um piso de 60 s — na prática, mexendo no Claude Code o número
   atualiza a cada minuto;
-- se a API falhar, o recuo dobra a cada tentativa (até 5 min) e o último
-  percentual bom continua na tela por até 10 min, com a idade no tooltip.
+- se a API falhar, o recuo dobra a cada tentativa (até 30 min).
 
-Baixar `interval_seconds` volta a dar 429. Se acontecer, a barra segura o
-último valor conhecido em vez de desabar para contagem de tokens.
+O último percentual bom é gravado em `%APPDATA%\ctsbar\last-usage.json`, então
+**reiniciar o app não faz a barra voltar para contagem de tokens**. Ele continua
+valendo:
+
+- sempre, nos primeiros 10 min;
+- depois disso, enquanto os transcripts não acusarem uso novo — sem uso, o
+  percentual não teria como ter mudado;
+- no máximo 1 h, porque uso em outra máquina ou no claude.ai também conta.
+
+Passado qualquer um desses limites, ou assim que a janela vira, o valor é
+descartado. A idade aparece no tooltip a partir de 90 s, para um número velho
+nunca se passar por atual.
+
+Para saber se a API está respondendo **agora**, sem o cache no meio:
+
+```powershell
+python -m ctsbar --check
+```
+
+A linha `API agora` faz uma consulta direta e mostra o resultado cru.
 
 ### Calibrar o fallback
 

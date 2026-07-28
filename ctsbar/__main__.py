@@ -81,6 +81,17 @@ def check(config: Config) -> int:
     print(f"log de erro {app_config_dir() / 'error.log'}")
     print(f"credencial  {credentials_path()}  {'ok' if credentials_path().exists() else 'AUSENTE'}")
     print(f"transcripts {projects_dir()}  {'ok' if projects_dir().is_dir() else 'AUSENTE'}")
+
+    # Chamada direta, sem passar pelo cache: e a unica forma de saber se a API
+    # esta respondendo agora. O poll abaixo pode legitimamente servir o cache.
+    from .sources import ApiUsageSource
+
+    direta = ApiUsageSource(config).read()
+    if direta.state is State.OK and direta.primary is not None:
+        print(f"API agora   ok — {direta.primary.percent:.1f}% em {direta.primary.label}")
+    else:
+        print(f"API agora   FALHOU — {direta.detail}")
+
     print()
     print(describe(UsageMonitor(config).poll()))
     return 0

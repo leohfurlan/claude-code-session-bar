@@ -72,3 +72,12 @@ def app_config_path() -> Path:
 def state_path() -> Path:
     """Cache de offsets de leitura dos transcripts (leitura incremental)."""
     return app_config_dir() / "read-state.json"
+
+
+def last_usage_path() -> Path:
+    """Ultimo percentual bom vindo da API.
+
+    Guardado em disco pra que reiniciar o app nao volte a mostrar contagem de
+    tokens enquanto a API (que e rate-limited) nao libera a proxima consulta.
+    """
+    return app_config_dir() / "last-usage.json"
