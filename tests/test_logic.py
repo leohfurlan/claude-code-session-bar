@@ -312,6 +312,75 @@ def test_janela_valida_nao_e_mexida():
     assert UsageMonitor._expire_if_stale(original).percent == 93.0
 
 
+# -------------------------------------------------------------- bandeja
+
+
+def _tray(snapshot):
+    """TrayIcon sem pystray instalado: da pra testar os callables mesmo assim."""
+    from ctsbar.ui.tray import TrayIcon
+
+    nada = lambda: None  # noqa: E731
+    return TrayIcon(
+        Config(),
+        get_snapshot=lambda: snapshot,
+        on_refresh=nada,
+        on_toggle_bar=nada,
+        on_reset_position=nada,
+        on_toggle_autostart=nada,
+        on_open_config=nada,
+        on_quit=nada,
+        is_autostart_enabled=lambda: False,
+        is_bar_visible=lambda: True,
+    )
+
+
+def test_textos_do_menu_aceitam_a_aridade_do_pystray():
+    """O pystray chama o callable de texto passando o proprio item."""
+    from ctsbar.models import UsageSnapshot
+
+    snapshot = UsageSnapshot(
+        state=State.OK,
+        source="api",
+        primary=LimitWindow("five_hour", 34.0, resets_at=time.time() + 3600),
+    )
+    tray = _tray(snapshot)
+
+    # Sem argumento e com argumento (o MenuItem) — as duas formas.
+    for texto in (tray._header_text, tray._source_text):
+        sem_arg = texto()
+        com_arg = texto(object())
+        assert sem_arg == com_arg
+        assert isinstance(sem_arg, str) and sem_arg
+
+    assert "34%" in tray._header_text()
+    assert "api" in tray._source_text().lower()
+
+
+def test_header_sem_sessao_nao_quebra():
+    from ctsbar.models import UsageSnapshot
+
+    tray = _tray(UsageSnapshot.unknown("sem dados"))
+    assert tray._header_text(object()) == "Sem sessao ativa"
+    assert isinstance(tray._tooltip(UsageSnapshot.unknown("x")), str)
+
+
+def test_tooltip_respeita_o_limite_do_windows():
+    from ctsbar.models import UsageSnapshot
+
+    snapshot = UsageSnapshot(
+        state=State.OK,
+        source="api",
+        primary=LimitWindow("five_hour", 34.0, resets_at=time.time() + 3600),
+        windows={
+            "five_hour": LimitWindow("five_hour", 34.0),
+            "seven_day": LimitWindow("seven_day", 10.0),
+            "seven_day_opus": LimitWindow("seven_day_opus", 55.0),
+        },
+        detail="detalhe bem comprido " * 20,
+    )
+    assert len(_tray(snapshot)._tooltip(snapshot)) <= 127
+
+
 # ---------------------------------------------------------------- config
 
 

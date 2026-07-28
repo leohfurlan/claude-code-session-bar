@@ -128,7 +128,11 @@ class TrayIcon:
 
     # -------------------------------------------------------------- menu
 
-    def _header_text(self) -> str:
+    # Os callables de menu do pystray sao chamados com aridade variavel
+    # dependendo da versao (texto recebe o item, acao recebe icone + item).
+    # `*_` aceita qualquer uma sem depender de introspeccao.
+
+    def _header_text(self, *_) -> str:
         snapshot = self._get_snapshot()
         if snapshot.has_percent and snapshot.primary is not None:
             remaining = snapshot.primary.seconds_to_reset()
@@ -138,7 +142,7 @@ class TrayIcon:
             return f"~{snapshot.tokens // 1000}k tokens na janela de 5h"
         return "Sem sessao ativa"
 
-    def _source_text(self) -> str:
+    def _source_text(self, *_) -> str:
         source = self._get_snapshot().source
         return {
             "api": "Fonte: API do Claude Code (exato)",
@@ -150,22 +154,22 @@ class TrayIcon:
             pystray.MenuItem(self._header_text, None, enabled=False),
             pystray.MenuItem(self._source_text, None, enabled=False),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem("Atualizar agora", lambda: self._on_refresh()),
+            pystray.MenuItem("Atualizar agora", lambda *_: self._on_refresh()),
             pystray.MenuItem(
                 "Mostrar barra",
-                lambda: self._on_toggle_bar(),
-                checked=lambda _item: self._is_bar_visible(),
+                lambda *_: self._on_toggle_bar(),
+                checked=lambda *_: self._is_bar_visible(),
             ),
-            pystray.MenuItem("Reposicionar barra", lambda: self._on_reset_position()),
+            pystray.MenuItem("Reposicionar barra", lambda *_: self._on_reset_position()),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem(
                 "Iniciar com o Windows",
-                lambda: self._on_toggle_autostart(),
-                checked=lambda _item: self._is_autostart_enabled(),
+                lambda *_: self._on_toggle_autostart(),
+                checked=lambda *_: self._is_autostart_enabled(),
             ),
-            pystray.MenuItem("Abrir config.json", lambda: self._on_open_config()),
+            pystray.MenuItem("Abrir config.json", lambda *_: self._on_open_config()),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem("Sair", lambda: self._on_quit()),
+            pystray.MenuItem("Sair", lambda *_: self._on_quit()),
         )
 
     # -------------------------------------------------------------- ciclo
@@ -182,9 +186,31 @@ class TrayIcon:
         )
         # O backend win32 do pystray monta o proprio message loop na thread em
         # que roda, entao pode viver fora da principal (que e do tkinter).
-        self._thread = threading.Thread(target=self._icon.run, name="ctsbar-tray", daemon=True)
+        self._thread = threading.Thread(target=self._run_safe, name="ctsbar-tray", daemon=True)
         self._thread.start()
         return True
+
+    def _run_safe(self) -> None:
+        """Roda o icone isolando falhas: a barra nunca cai junto com a bandeja.
+
+        Sem isto, um erro aqui some sem deixar rastro quando o app roda por
+        pythonw, que nao tem console pra onde imprimir o traceback.
+        """
+        try:
+            self._icon.run()
+        except Exception:
+            import traceback
+            from datetime import datetime
+
+            from ..paths import app_config_dir
+
+            try:
+                app_config_dir().mkdir(parents=True, exist_ok=True)
+                with (app_config_dir() / "error.log").open("a", encoding="utf-8") as handle:
+                    handle.write(f"\n{'=' * 70}\n{datetime.now():%Y-%m-%d %H:%M:%S}  [bandeja]\n")
+                    traceback.print_exc(file=handle)
+            except Exception:
+                pass
 
     def update(self, snapshot: UsageSnapshot) -> None:
         """Redesenha o icone so quando o percentual visivel muda."""
