@@ -110,6 +110,9 @@ def main(argv=None) -> int:
     parser.add_argument(
         "--api-debug", action="store_true", help="consulta crua a API, com status e cabecalhos"
     )
+    parser.add_argument(
+        "--user-agent", help="User-Agent so nesta chamada, pra testar (usa com --api-debug)"
+    )
     args = parser.parse_args(argv)
 
     config = Config.load()
@@ -117,7 +120,7 @@ def main(argv=None) -> int:
     if args.api_debug:
         from .sources.api import probe
 
-        print(probe(config))
+        print(probe(config, args.user_agent))
         return 0
 
     if args.check:

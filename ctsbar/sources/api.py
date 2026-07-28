@@ -38,6 +38,10 @@ from ..models import UsageSnapshot, LimitWindow, State
 from ..paths import credentials_path
 
 OAUTH_BETA = "oauth-2025-04-20"
+
+# Identificacao honesta por padrao. A CLI oficial manda `claude-code/<versao>`
+# nesta mesma chamada; se o endpoint recusar clientes que nao se identificam
+# assim, `api.user_agent` permite ajustar — a decisao e de quem usa.
 USER_AGENT = "ctsbar/1.0 (claude-code-session-bar)"
 KNOWN_WINDOWS = ("five_hour", "seven_day", "seven_day_opus", "seven_day_sonnet")
 
@@ -128,7 +132,11 @@ def parse_retry_after(headers: Any) -> Optional[float]:
     return max(0.0, alvo.timestamp() - time.time())
 
 
-def probe(config) -> str:
+def user_agent_for(config, override: Optional[str] = None) -> str:
+    return override or config.get("api.user_agent") or USER_AGENT
+
+
+def probe(config, user_agent: Optional[str] = None) -> str:
     """Uma consulta crua, pra diagnostico. Nunca imprime o token."""
     token, expires_at = read_access_token()
     linhas = [
@@ -138,10 +146,11 @@ def probe(config) -> str:
     if not token:
         return "\n".join(linhas + ["  Faca login com `claude` uma vez."])
 
+    agente = user_agent_for(config, user_agent)
     base = (config.get("api.base_url") or "https://api.anthropic.com").rstrip("/")
     url = f"{base}/api/oauth/usage"
     linhas.append(f"GET        {url}")
-    linhas.append(f"user-agent {USER_AGENT}")
+    linhas.append(f"user-agent {agente}")
 
     request = urllib.request.Request(
         url,
@@ -149,7 +158,7 @@ def probe(config) -> str:
             "Authorization": f"Bearer {token}",
             "anthropic-beta": OAUTH_BETA,
             "Content-Type": "application/json",
-            "User-Agent": USER_AGENT,
+            "User-Agent": agente,
             "Accept": "application/json",
         },
         method="GET",
@@ -246,7 +255,7 @@ class ApiUsageSource:
                 "Authorization": f"Bearer {token}",
                 "anthropic-beta": OAUTH_BETA,
                 "Content-Type": "application/json",
-                "User-Agent": USER_AGENT,
+                "User-Agent": user_agent_for(self.config),
                 "Accept": "application/json",
             },
             method="GET",

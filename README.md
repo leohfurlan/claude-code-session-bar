@@ -300,6 +300,31 @@ de usar o próprio recuo.
 > puxam do mesmo lugar, contra o mesmo limite da sua conta. Se o `429` for
 > teimoso, aumentar `api.interval_seconds` costuma resolver mais que diminuir.
 
+### Quando o 429 não passa
+
+Se o `--api-debug` devolver `429` mesmo com o token válido e depois de minutos
+parado, provavelmente não é cota — é a borda recusando o cliente. Dois sinais
+apontam para isso:
+
+- `Retry-After: 0` (cota esgotada de verdade traz um valor positivo);
+- resposta idêntica à que o endpoint dá para uma requisição **sem token nenhum**.
+
+A CLI oficial manda `User-Agent: claude-code/<versão>` nessa mesma chamada. Dá
+para testar se é isso, sem alterar nada de forma permanente:
+
+```powershell
+python -m ctsbar --api-debug --user-agent "claude-code/2.1.42"
+```
+
+Se voltar `200`, o endpoint está filtrando por identificação de cliente. Para
+tornar permanente, `api.user_agent` no `config.json`.
+
+**Vale saber o que isso significa.** O padrão é a barra se identificar como ela
+mesma. Trocar para o User-Agent da CLI é apresentar-se como o cliente oficial —
+provavelmente é justamente o que a filtragem pretende impedir, ainda que aqui
+seja você lendo o seu próprio uso com a sua própria credencial. O projeto expõe
+o campo e deixa a escolha com você; não faz isso por conta própria.
+
 ### Calibrar o fallback
 
 O fallback conta tokens, não percentual — o percentual real é calculado no

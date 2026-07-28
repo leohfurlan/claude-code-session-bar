@@ -46,6 +46,9 @@ DEFAULTS: Dict[str, Any] = {
         # Piso pra antecipar a consulta quando ha uso novo nos transcripts.
         "min_interval_seconds": 60,
         "base_url": "https://api.anthropic.com",
+        # Nulo = identificacao propria da barra. Veja "Quando o 429 nao passa"
+        # no README antes de mexer.
+        "user_agent": None,
         # A API devolve utilization em 0-100. "fraction" multiplica por 100,
         # caso alguma versao futura mude a escala.
         "utilization_scale": "percent",
