@@ -1,0 +1,4 @@
+# Icone na bandeja do sistema. A barra flutuante usa so tkinter (stdlib) e
+# ctypes, entao estas duas sao as unicas dependencias externas do projeto.
+pystray>=0.19.5
+Pillow>=10.0.0
