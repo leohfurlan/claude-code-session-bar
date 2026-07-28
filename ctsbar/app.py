@@ -16,7 +16,9 @@ from .ui.tray import TRAY_AVAILABLE, TrayIcon
 class App:
     def __init__(self, config: Config):
         self.config = config
-        self.monitor = UsageMonitor(config, on_update=self._on_snapshot)
+        self.monitor = UsageMonitor(
+            config, on_update=self._on_snapshot, on_refresh_failed=self._on_refresh_failed
+        )
         self.bar = UsageBar(config, on_refresh=self.monitor.refresh_now)
         self.tray = None
 
@@ -41,6 +43,15 @@ class App:
         # nunca em widget tkinter. A barra puxa o estado pelo proprio loop.
         if self.tray is not None:
             self.tray.update(snapshot)
+
+    def _on_refresh_failed(self, detail: str) -> None:
+        """Avisa quando 'Atualizar agora' nao conseguiu dado novo.
+
+        Sem isto o valor antigo continua na tela e parece que o botao nao faz
+        nada — quando na verdade a API recusou a consulta.
+        """
+        if self.tray is not None:
+            self.tray.show_message("Nao foi possivel atualizar", detail)
 
     def _toggle_bar(self) -> None:
         # Agendar no loop do tk mantem toda mexida de widget na thread certa.

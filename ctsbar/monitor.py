@@ -39,9 +39,16 @@ FORCED_REFRESH_FLOOR = 5
 class UsageMonitor:
     """Roda em background e chama `on_update` a cada snapshot novo."""
 
-    def __init__(self, config: Config, on_update: Optional[Callable[[UsageSnapshot], None]] = None):
+    def __init__(
+        self,
+        config: Config,
+        on_update: Optional[Callable[[UsageSnapshot], None]] = None,
+        on_refresh_failed: Optional[Callable[[str], None]] = None,
+    ):
         self.config = config
         self._on_update = on_update
+        self._on_refresh_failed = on_refresh_failed
+        self._retry_after: Optional[float] = None
         self._api = ApiUsageSource(config)
         self._transcripts = TranscriptUsageSource(config)
         self._snapshot = UsageSnapshot.unknown("Iniciando…")
@@ -118,10 +125,21 @@ class UsageMonitor:
 
     def _api_interval(self) -> float:
         """Espera ate a proxima chamada, ja considerando o recuo por falha."""
-        base = self._setting("api.interval_seconds", 300)
+        base = self._setting("api.interval_seconds", 120)
         if self._api_failures == 0:
             return base
+        # Retry-After do servidor manda mais que o nosso recuo por dobra.
+        if self._retry_after:
+            return min(API_MAX_BACKOFF, max(base, self._retry_after))
         return min(API_MAX_BACKOFF, base * (2 ** self._api_failures))
+
+    def _notify_refresh_failed(self, detail: str) -> None:
+        if self._on_refresh_failed is None:
+            return
+        try:
+            self._on_refresh_failed(detail)
+        except Exception:
+            pass
 
     def _should_call_api(self, now: float, new_activity: bool) -> bool:
         """A API e rate-limited: chamamos devagar, e mais cedo so se houver uso.
@@ -254,18 +272,25 @@ class UsageMonitor:
 
         if self._api.enabled and self._should_call_api(now, new_activity):
             self._last_api_attempt = now
-            self._force_api = False
+            forced, self._force_api = self._force_api, False
             snapshot = self._api.read()
             if snapshot.state is State.OK and snapshot.primary is not None:
                 self._api_failures = 0
+                self._retry_after = None
                 self._last_activity = activity
                 self._activity_at_capture = activity
                 self._last_api = replace(snapshot, captured_at=now)
                 self._save_last_api(self._last_api, activity)
                 return self._expire_if_stale(self._last_api)
             self._api_failures += 1
+            # Se o servidor disse quando voltar, obedecemos em vez de chutar.
+            self._retry_after = getattr(self._api, "last_retry_after", None)
             if snapshot.detail:
                 notes.append(snapshot.detail)
+            if forced:
+                # Sem isto o usuario aperta "Atualizar agora", nada muda e ele
+                # nao tem como saber que a API recusou.
+                self._notify_refresh_failed(snapshot.detail or "A API nao respondeu")
 
         cached = self._cached_api(now, activity)
         if cached is not None:

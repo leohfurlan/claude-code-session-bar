@@ -411,6 +411,53 @@ def test_valor_do_cache_vem_marcado_como_velho():
     assert fresh.stale_seconds is None
 
 
+def test_parse_retry_after_aceita_segundos_e_data():
+    from ctsbar.sources.api import parse_retry_after
+
+    assert parse_retry_after({"retry-after": "120"}) == 120.0
+    assert parse_retry_after({"Retry-After": "45"}) == 45.0
+    assert parse_retry_after({}) is None
+    assert parse_retry_after(None) is None
+    assert parse_retry_after({"retry-after": "lixo"}) is None
+
+    futuro = parse_retry_after({"retry-after": "Wed, 29 Jul 2026 12:00:00 GMT"})
+    assert futuro is not None and futuro >= 0
+
+
+def test_retry_after_do_servidor_manda_no_recuo():
+    """Obedecer o servidor é melhor que chutar um recuo próprio."""
+    monitor = _monitor_com_api(_FakeApi("erro"), interval_seconds=120)
+    monitor._api_failures = 1
+
+    monitor._retry_after = None
+    assert monitor._api_interval() == 240  # dobra padrao
+
+    monitor._retry_after = 900
+    assert monitor._api_interval() == 900  # servidor pediu mais
+
+    monitor._retry_after = 30
+    assert monitor._api_interval() == 120  # nunca abaixo do intervalo base
+
+
+def test_falha_no_refresh_manual_avisa_o_usuario():
+    """Sem aviso, apertar o botao e nada mudar parece um botao quebrado."""
+    avisos = []
+    monitor = UsageMonitor(
+        Config({"api": {"interval_seconds": 120}, "fallback": {"enabled": False}}),
+        on_refresh_failed=avisos.append,
+    )
+    monitor._api = _FakeApi("API respondeu 429 (consultas demais)")
+
+    monitor.poll()  # primeira leitura, automatica: nao avisa
+    assert avisos == []
+
+    monitor.refresh_now()
+    monitor._last_api_attempt = time.time() - 10
+    monitor.poll()
+    assert len(avisos) == 1
+    assert "429" in avisos[0]
+
+
 def test_o_recuo_precisa_de_fato_recuar():
     """Com o teto igual ao intervalo base, o recuo seria um no-op."""
     from ctsbar.monitor import API_MAX_BACKOFF

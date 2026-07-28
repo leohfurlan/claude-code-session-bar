@@ -107,9 +107,18 @@ def main(argv=None) -> int:
     parser.add_argument("--disable-autostart", action="store_true", help="nao iniciar com o Windows")
     parser.add_argument("--write-config", action="store_true", help="grava o config.json padrao")
     parser.add_argument("--check", action="store_true", help="diagnostico do ambiente")
+    parser.add_argument(
+        "--api-debug", action="store_true", help="consulta crua a API, com status e cabecalhos"
+    )
     args = parser.parse_args(argv)
 
     config = Config.load()
+
+    if args.api_debug:
+        from .sources.api import probe
+
+        print(probe(config))
+        return 0
 
     if args.check:
         return check(config)

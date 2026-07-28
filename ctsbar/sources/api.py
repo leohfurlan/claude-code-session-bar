@@ -101,6 +101,90 @@ def parse_reset(value: Any) -> Optional[float]:
     return None
 
 
+def parse_retry_after(headers: Any) -> Optional[float]:
+    """Le o cabecalho Retry-After de um 429. Aceita segundos ou data HTTP."""
+    if headers is None:
+        return None
+    try:
+        raw = headers.get("retry-after") or headers.get("Retry-After")
+    except Exception:
+        return None
+    if not raw:
+        return None
+
+    text = str(raw).strip()
+    if text.isdigit():
+        return float(text)
+    try:
+        from email.utils import parsedate_to_datetime
+
+        alvo = parsedate_to_datetime(text)
+    except (TypeError, ValueError, IndexError):
+        return None
+    if alvo is None:
+        return None
+    if alvo.tzinfo is None:
+        alvo = alvo.replace(tzinfo=timezone.utc)
+    return max(0.0, alvo.timestamp() - time.time())
+
+
+def probe(config) -> str:
+    """Uma consulta crua, pra diagnostico. Nunca imprime o token."""
+    token, expires_at = read_access_token()
+    linhas = [
+        f"token      {'presente' if token else 'AUSENTE'}"
+        + (f" (expira em {format_expiry(expires_at)})" if expires_at else ""),
+    ]
+    if not token:
+        return "\n".join(linhas + ["  Faca login com `claude` uma vez."])
+
+    base = (config.get("api.base_url") or "https://api.anthropic.com").rstrip("/")
+    url = f"{base}/api/oauth/usage"
+    linhas.append(f"GET        {url}")
+    linhas.append(f"user-agent {USER_AGENT}")
+
+    request = urllib.request.Request(
+        url,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "anthropic-beta": OAUTH_BETA,
+            "Content-Type": "application/json",
+            "User-Agent": USER_AGENT,
+            "Accept": "application/json",
+        },
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            status, headers, body = response.status, response.headers, response.read()
+    except urllib.error.HTTPError as exc:
+        status, headers, body = exc.code, exc.headers, exc.read()
+    except urllib.error.URLError as exc:
+        return "\n".join(linhas + [f"FALHA      sem resposta: {exc.reason}"])
+
+    linhas.append(f"HTTP       {status}")
+    interessantes = [
+        (nome, valor)
+        for nome, valor in (headers.items() if headers else [])
+        if "ratelimit" in nome.lower() or nome.lower() in ("retry-after", "x-should-retry")
+    ]
+    for nome, valor in interessantes:
+        linhas.append(f"  {nome}: {valor}")
+    if not interessantes:
+        linhas.append("  (nenhum cabecalho de rate limit na resposta)")
+
+    texto = body.decode("utf-8", errors="replace")[:600]
+    linhas.append(f"corpo      {texto}")
+    return "\n".join(linhas)
+
+
+def format_expiry(expires_at: float) -> str:
+    restante = expires_at - time.time()
+    if restante <= 0:
+        return "JA EXPIROU"
+    return f"{int(restante // 3600)}h{int(restante % 3600 // 60):02d}m"
+
+
 def parse_utilization(value: Any, scale: str = "percent") -> Optional[float]:
     """Normaliza utilization pra 0-100."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
@@ -137,6 +221,8 @@ class ApiUsageSource:
 
     def __init__(self, config):
         self.config = config
+        self.last_retry_after: Optional[float] = None
+        """Segundos pedidos pelo servidor no ultimo 429, quando informado."""
 
     @property
     def enabled(self) -> bool:
@@ -174,6 +260,7 @@ class ApiUsageSource:
         if not self.enabled:
             return UsageSnapshot.unknown("Fonte API desativada", source=self.name)
 
+        self.last_retry_after = None
         try:
             payload = self._fetch()
         except AuthError as exc:
@@ -182,7 +269,15 @@ class ApiUsageSource:
             if exc.code in (401, 403):
                 detail = "Credencial expirada ou sem permissao (rode `claude` pra renovar)"
             elif exc.code == 429:
-                detail = "API respondeu 429 (limite atingido) — tentando de novo no proximo ciclo"
+                # O servidor manda quando voltar; obedecer e melhor do que
+                # chutar um recuo proprio.
+                self.last_retry_after = parse_retry_after(exc.headers)
+                espera = (
+                    f" — tentar de novo em {int(self.last_retry_after)}s"
+                    if self.last_retry_after
+                    else " — tentando de novo no proximo ciclo"
+                )
+                detail = f"API respondeu 429 (consultas demais){espera}"
             else:
                 detail = f"API respondeu HTTP {exc.code}"
             return UsageSnapshot.error(detail, source=self.name)

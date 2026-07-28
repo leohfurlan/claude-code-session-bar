@@ -284,10 +284,21 @@ nunca se passar por atual.
 Para saber se a API está respondendo **agora**, sem o cache no meio:
 
 ```powershell
-python -m ctsbar --check
+python -m ctsbar --check       # linha "API agora": consulta direta
+python -m ctsbar --api-debug   # status HTTP, cabeçalhos de rate limit e corpo
 ```
 
-A linha `API agora` faz uma consulta direta e mostra o resultado cru.
+O `--api-debug` faz uma requisição crua e mostra a resposta inteira — é o que
+responde se um `~` teimoso é rate limit, credencial ou rede. **Nunca imprime o
+token.**
+
+Num `429`, se o servidor mandar `Retry-After`, a barra obedece esse valor em vez
+de usar o próprio recuo.
+
+> **Você não é o único cliente consultando esse endpoint.** O app de desktop do
+> Claude também mostra uso na bandeja, e o claude.ai atualiza sozinho — todos
+> puxam do mesmo lugar, contra o mesmo limite da sua conta. Se o `429` for
+> teimoso, aumentar `api.interval_seconds` costuma resolver mais que diminuir.
 
 ### Calibrar o fallback
 
