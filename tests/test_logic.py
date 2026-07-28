@@ -73,14 +73,55 @@ def test_parse_payload_monta_as_janelas():
     payload = {
         "five_hour": {"utilization": 42, "resets_at": "2026-07-28T18:00:00Z"},
         "seven_day": {"utilization": 11, "resets_at": 1785261600},
+        # utilization nulo nao vira janela...
         "seven_day_sonnet": {"utilization": None},
-        "lixo": {"utilization": 99},
+        # ...mas chave desconhecida com numero valido vira, sim: a API manda
+        # janelas alem das documentadas e novas surgem sem aviso.
+        "cinder_cove": {"utilization": 99},
     }
     windows = parse_payload(payload)
-    assert set(windows) == {"five_hour", "seven_day"}
+    assert set(windows) == {"five_hour", "seven_day", "cinder_cove"}
     assert windows["five_hour"].percent == 42.0
     assert windows["five_hour"].label == "Sessao (5h)"
     assert windows["seven_day"].resets_at == 1785261600.0
+
+
+def test_parse_payload_com_a_resposta_real_da_api():
+    """Payload real capturado do endpoint, com as chaves que ele de fato manda."""
+    payload = {
+        "five_hour": {
+            "utilization": 80.0,
+            "resets_at": "2026-07-28T18:09:59.165131+00:00",
+            "limit_dollars": None,
+            "used_dollars": None,
+        },
+        "seven_day": {"utilization": 14.0, "resets_at": "2026-08-03T14:00:00.165163+00:00"},
+        # Janelas que nao se aplicam ao plano vem nulas.
+        "seven_day_opus": None,
+        "seven_day_sonnet": None,
+        "seven_day_cowork": None,
+        "tangelo": None,
+        # Forma diferente: nao tem utilization, nao vira janela.
+        "extra_usage": {"is_enabled": False, "monthly_limit": None},
+    }
+    windows = parse_payload(payload)
+
+    assert set(windows) == {"five_hour", "seven_day"}
+    assert windows["five_hour"].percent == 80.0
+    # ISO-8601 com microssegundos e offset explicito.
+    assert windows["five_hour"].resets_at == 1785262199.165131
+    # 80% cai na faixa vermelha.
+    assert level_for(windows["five_hour"].percent, 50, 80) is Level.DANGER
+
+
+def test_janela_desconhecida_nao_e_descartada():
+    """Chaves novas aparecem sem aviso; melhor mostrar do que sumir com o dado."""
+    windows = parse_payload({"seven_day_cowork": {"utilization": 22.0}})
+    assert windows["seven_day_cowork"].percent == 22.0
+    assert windows["seven_day_cowork"].label == "Semana (Cowork)"
+
+    inedita = parse_payload({"nimbus_quill": {"utilization": 5.0}})
+    assert inedita["nimbus_quill"].label == "Nimbus quill"
 
 
 def test_parse_payload_tolera_lixo():

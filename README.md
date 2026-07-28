@@ -316,8 +316,14 @@ para testar se é isso, sem alterar nada de forma permanente:
 python -m ctsbar --api-debug --user-agent "claude-code/2.1.42"
 ```
 
-Se voltar `200`, o endpoint está filtrando por identificação de cliente. Para
-tornar permanente, `api.user_agent` no `config.json`.
+Testado: com o User-Agent próprio dá `429 / Retry-After: 0`; com o da CLI dá
+`200` e o payload completo. **O endpoint filtra por identificação de cliente.**
+
+Para tornar permanente, no `config.json`:
+
+```jsonc
+"api": { "user_agent": "claude-code/2.1.42" }
+```
 
 **Vale saber o que isso significa.** O padrão é a barra se identificar como ela
 mesma. Trocar para o User-Agent da CLI é apresentar-se como o cliente oficial —

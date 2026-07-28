@@ -9,11 +9,18 @@ O Claude Code alimenta o `/usage` com:
 A resposta traz uma entrada por janela de limite:
 
     {
-      "five_hour":         {"utilization": 42, "resets_at": ...},
-      "seven_day":         {"utilization": 11, "resets_at": ...},
-      "seven_day_opus":    {...},
-      "seven_day_sonnet":  {...}
+      "five_hour":  {"utilization": 80.0, "resets_at": "2026-07-28T18:09:59+00:00"},
+      "seven_day":  {"utilization": 14.0, "resets_at": "2026-08-03T14:00:00+00:00"},
+      "seven_day_opus": null, "seven_day_cowork": null, ...
     }
+
+Janelas que nao se aplicam ao plano vem nulas, e a resposta traz varias chaves
+alem das quatro documentadas — por isso o parsing aceita qualquer uma que
+tenha `utilization` numerico, em vez de uma lista fixa.
+
+O endpoint filtra por User-Agent: com identificacao propria ele responde 429 e
+`Retry-After: 0`, a mesma resposta que da pra requisicao sem token. Veja
+`api.user_agent` no README.
 
 `utilization` vem em 0-100 e `resets_at` pode ser epoch (s ou ms) ou ISO-8601,
 entao os dois formatos sao aceitos. O token sai de CLAUDE_CODE_OAUTH_TOKEN ou
@@ -43,7 +50,6 @@ OAUTH_BETA = "oauth-2025-04-20"
 # nesta mesma chamada; se o endpoint recusar clientes que nao se identificam
 # assim, `api.user_agent` permite ajustar — a decisao e de quem usa.
 USER_AGENT = "ctsbar/1.0 (claude-code-session-bar)"
-KNOWN_WINDOWS = ("five_hour", "seven_day", "seven_day_opus", "seven_day_sonnet")
 
 
 class AuthError(Exception):
@@ -203,13 +209,19 @@ def parse_utilization(value: Any, scale: str = "percent") -> Optional[float]:
 
 
 def parse_payload(payload: Any, scale: str = "percent") -> Dict[str, LimitWindow]:
-    """Converte o JSON da API no dicionario de janelas."""
+    """Converte o JSON da API no dicionario de janelas.
+
+    Aceita qualquer chave que traga um `utilization` numerico, em vez de uma
+    lista fixa: a resposta real inclui janelas alem das quatro conhecidas
+    (`seven_day_cowork`, `seven_day_oauth_apps`, entre outras) e novas surgem
+    sem aviso. Entradas nulas — comuns pra janelas que nao se aplicam ao plano
+    — sao simplesmente ignoradas.
+    """
     if not isinstance(payload, dict):
         return {}
 
     windows: Dict[str, LimitWindow] = {}
-    for key in KNOWN_WINDOWS:
-        entry = payload.get(key)
+    for key, entry in payload.items():
         if not isinstance(entry, dict):
             continue
         percent = parse_utilization(entry.get("utilization"), scale)

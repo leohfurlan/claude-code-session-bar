@@ -40,7 +40,22 @@ WINDOW_LABELS: Dict[str, str] = {
     "seven_day": "Semana (todos os modelos)",
     "seven_day_opus": "Semana (Opus)",
     "seven_day_sonnet": "Semana (Sonnet)",
+    "seven_day_cowork": "Semana (Cowork)",
+    "seven_day_oauth_apps": "Semana (apps OAuth)",
 }
+
+
+def pretty_key(key: str) -> str:
+    """Nome legivel pra janela que a API mandou e nos nao conhecemos.
+
+    A resposta traz varias chaves alem das documentadas, e novas aparecem sem
+    aviso. Melhor mostrar `seven_day_cowork` de forma decente do que sumir com
+    o dado.
+    """
+    if key in WINDOW_LABELS:
+        return WINDOW_LABELS[key]
+    texto = key.replace("_", " ").strip()
+    return texto[:1].upper() + texto[1:] if texto else key
 
 # Duracao nominal de cada janela, em segundos. Valores confirmados no bundle do
 # Claude Code (five_hour = 18000s, seven_day = 604800s).
@@ -65,7 +80,7 @@ class LimitWindow:
 
     @property
     def label(self) -> str:
-        return WINDOW_LABELS.get(self.key, self.key)
+        return pretty_key(self.key)
 
     def seconds_to_reset(self, now: Optional[float] = None) -> Optional[float]:
         if self.resets_at is None:
