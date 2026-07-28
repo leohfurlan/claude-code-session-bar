@@ -294,6 +294,115 @@ def test_monitor_sem_credencial_e_sem_transcripts_fica_neutro(tmp_path, monkeypa
     assert snapshot.percent in (0.0, None)
 
 
+class _FakeApi:
+    """Fonte de API controlavel, pra simular 429 e recuperacao."""
+
+    name = "api"
+    enabled = True
+
+    def __init__(self, *respostas):
+        self.respostas = list(respostas)
+        self.chamadas = 0
+
+    def read(self):
+        from ctsbar.models import UsageSnapshot
+
+        self.chamadas += 1
+        valor = self.respostas.pop(0) if self.respostas else self.respostas_padrao
+        if isinstance(valor, str):
+            return UsageSnapshot.error(valor, source="api")
+        return UsageSnapshot(
+            state=State.OK,
+            source="api",
+            primary=LimitWindow("five_hour", valor, resets_at=time.time() + 3600),
+        )
+
+    respostas_padrao = "API respondeu 429 (limite atingido)"
+
+
+def _monitor_com_api(fake, **config_extra):
+    """Monitor com a API simulada e o fallback desligado, pra isolar a API."""
+    monitor = UsageMonitor(Config({"api": config_extra, "fallback": {"enabled": False}}))
+    monitor._api = fake
+    return monitor
+
+
+def test_api_nao_e_consultada_a_cada_ciclo():
+    """Bater no endpoint todo ciclo rende 429 — o valor bom fica em cache."""
+    fake = _FakeApi(34.0)
+    monitor = _monitor_com_api(fake)
+
+    primeiro = monitor.poll()
+    assert primeiro.percent == 34.0
+    assert fake.chamadas == 1
+
+    # Ciclos seguintes, sem atividade nova: serve o cache, sem tocar na API.
+    for _ in range(5):
+        assert monitor.poll().percent == 34.0
+    assert fake.chamadas == 1
+
+
+def test_429_mantem_o_ultimo_percentual_em_vez_de_cair_pra_tokens():
+    fake = _FakeApi(34.0, "API respondeu 429 (limite atingido)")
+    monitor = _monitor_com_api(fake, interval_seconds=0)
+
+    assert monitor.poll().percent == 34.0
+    depois = monitor.poll()  # agora a API falha
+    assert fake.chamadas == 2
+    assert depois.percent == 34.0  # segurou o valor bom
+    assert depois.source == "api"
+
+
+def test_falhas_seguidas_aumentam_o_recuo():
+    fake = _FakeApi("erro", "erro", "erro")
+    monitor = _monitor_com_api(fake, interval_seconds=10)
+
+    assert monitor._api_interval() == 10  # sem falhas
+    monitor.poll()
+    assert monitor._api_interval() == 20
+    monitor._last_api_attempt = 0.0  # libera a proxima tentativa
+    monitor.poll()
+    assert monitor._api_interval() == 40
+
+
+def test_cache_expira_e_nao_engana():
+    from ctsbar.models import UsageSnapshot
+
+    monitor = _monitor_com_api(_FakeApi())
+    monitor._last_api = UsageSnapshot(
+        state=State.OK,
+        source="api",
+        primary=LimitWindow("five_hour", 34.0, resets_at=time.time() + 3600),
+        captured_at=time.time() - 3600,  # bem velho
+    )
+    assert monitor._cached_api(time.time()) is None
+
+
+def test_cache_e_descartado_quando_a_janela_vira():
+    from ctsbar.models import UsageSnapshot
+
+    monitor = _monitor_com_api(_FakeApi())
+    monitor._last_api = UsageSnapshot(
+        state=State.OK,
+        source="api",
+        primary=LimitWindow("five_hour", 93.0, resets_at=time.time() - 1),
+    )
+    assert monitor._cached_api(time.time()) is None
+
+
+def test_cache_avisa_a_idade_do_valor():
+    from ctsbar.models import UsageSnapshot
+
+    monitor = _monitor_com_api(_FakeApi())
+    monitor._last_api = UsageSnapshot(
+        state=State.OK,
+        source="api",
+        primary=LimitWindow("five_hour", 34.0, resets_at=time.time() + 3600),
+        captured_at=time.time() - 240,
+    )
+    assert "atras" in monitor._cached_api(time.time()).detail
+
+
 def test_janela_vencida_zera_o_percentual():
     stale = LimitWindow("five_hour", percent=93.0, resets_at=time.time() - 10)
     from ctsbar.models import UsageSnapshot

@@ -39,6 +39,12 @@ DEFAULTS: Dict[str, Any] = {
     "api": {
         "enabled": True,
         "timeout_seconds": 6,
+        # O endpoint de uso e rate-limited: consultar a cada ciclo rende 429.
+        # Entre consultas a barra mostra o ultimo percentual, com a contagem
+        # regressiva correndo localmente.
+        "interval_seconds": 300,
+        # Piso pra antecipar a consulta quando ha uso novo nos transcripts.
+        "min_interval_seconds": 60,
         "base_url": "https://api.anthropic.com",
         # A API devolve utilization em 0-100. "fraction" multiplica por 100,
         # caso alguma versao futura mude a escala.

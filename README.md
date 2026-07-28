@@ -211,7 +211,12 @@ python -m ctsbar --write-config
   },
 
   "taskbar_embed": false,          // experimental, veja abaixo
-  "api": { "enabled": true, "timeout_seconds": 6 },
+  "api": {
+    "enabled": true,
+    "timeout_seconds": 6,
+    "interval_seconds": 300,      // de quanto em quanto tempo consultar a API
+    "min_interval_seconds": 60    // piso ao antecipar por uso novo
+  },
   "fallback": { "enabled": true, "token_budget": null },
 
   "colors": {
@@ -239,6 +244,23 @@ redesenha a taskbar em vários eventos (troca de DPI, "mostrar área de trabalho
 reinício do `explorer.exe`), levando a janela filha junto. Se o reparenting
 falhar, a barra volta sozinha pro modo flutuante, que é o caminho confiável — e
 é por isso que o modo flutuante é o padrão.
+
+### Com que frequência o percentual atualiza
+
+A barra roda a cada 20 s, mas o `/api/oauth/usage` é **rate-limited** — consultar
+a cada ciclo devolve `HTTP 429` e nenhum dado. Então:
+
+- a API é consultada a cada **5 min** (`api.interval_seconds`);
+- entre consultas a barra mostra o último percentual, com a **contagem
+  regressiva correndo localmente** a cada segundo;
+- quando os transcripts acusam **uso novo**, a consulta é antecipada,
+  respeitando um piso de 60 s — na prática, mexendo no Claude Code o número
+  atualiza a cada minuto;
+- se a API falhar, o recuo dobra a cada tentativa (até 5 min) e o último
+  percentual bom continua na tela por até 10 min, com a idade no tooltip.
+
+Baixar `interval_seconds` volta a dar 429. Se acontecer, a barra segura o
+último valor conhecido em vez de desabar para contagem de tokens.
 
 ### Calibrar o fallback
 
