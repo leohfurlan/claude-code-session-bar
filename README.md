@@ -311,6 +311,25 @@ tem `claudeAiOauth.accessToken`. Rode `claude` uma vez e faça login. Se você u
 ele renova sozinho e a barra volta ao normal no ciclo seguinte. A barra não
 mexe nas suas credenciais.
 
+**A janela pisca e some / nada aparece** — comece por aqui:
+
+```powershell
+python -m ctsbar --check     # o que falta no ambiente
+python -m ctsbar             # com console: mostra o traceback
+```
+
+Rodando por `run.bat` não há console, então qualquer crash vai para
+`%APPDATA%\ctsbar\error.log` e abre uma caixa de diálogo com o motivo.
+
+Se a barra sobe mas fica invisível, desligue o estilo nativo no `config.json`:
+
+```jsonc
+"bar": { "tool_window": false }
+```
+
+Ela passa a aparecer no Alt+Tab, mas fica visível. É o único ajuste que mexe em
+estilo de janela do Windows.
+
 **A barra some ao trocar de aplicativo** — era um bug, corrigido. Se ainda
 acontecer, atualize (`git pull`) e reinicie. Uma janela sem borda no Windows
 perde o "sempre no topo" quando outro processo assume o foreground; a barra

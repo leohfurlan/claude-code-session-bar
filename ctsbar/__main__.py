@@ -46,6 +46,46 @@ def describe(snapshot) -> str:
     return line
 
 
+def check(config: Config) -> int:
+    """Mostra tudo que a barra precisa pra subir, e o que esta faltando."""
+    from .paths import app_config_dir, credentials_path, projects_dir
+
+    print(f"python      {sys.version.split()[0]}  ({sys.executable})")
+    print(f"plataforma  {sys.platform}")
+
+    try:
+        import tkinter
+
+        root = tkinter.Tk()
+        root.withdraw()
+        print(f"tkinter     ok (Tk {root.tk.call('info', 'patchlevel')})")
+        root.destroy()
+    except Exception as exc:
+        print(f"tkinter     FALTA — {type(exc).__name__}: {exc}")
+
+    try:
+        import pystray  # noqa: F401
+        from PIL import Image  # noqa: F401
+
+        print("bandeja     ok (pystray + Pillow)")
+    except ImportError as exc:
+        print(f"bandeja     FALTA — {exc} (pip install -r requirements.txt)")
+
+    if sys.platform == "win32":
+        from .winapi import work_area
+
+        area = work_area()
+        print(f"area util   {area}" if area else "area util   nao obtida")
+
+    print(f"config      {config.path}{'' if config.path.exists() else '  (ainda nao criado)'}")
+    print(f"log de erro {app_config_dir() / 'error.log'}")
+    print(f"credencial  {credentials_path()}  {'ok' if credentials_path().exists() else 'AUSENTE'}")
+    print(f"transcripts {projects_dir()}  {'ok' if projects_dir().is_dir() else 'AUSENTE'}")
+    print()
+    print(describe(UsageMonitor(config).poll()))
+    return 0
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
         prog="ctsbar", description="Barra de uso da sessao do Claude Code"
@@ -55,9 +95,13 @@ def main(argv=None) -> int:
     parser.add_argument("--enable-autostart", action="store_true", help="iniciar com o Windows")
     parser.add_argument("--disable-autostart", action="store_true", help="nao iniciar com o Windows")
     parser.add_argument("--write-config", action="store_true", help="grava o config.json padrao")
+    parser.add_argument("--check", action="store_true", help="diagnostico do ambiente")
     args = parser.parse_args(argv)
 
     config = Config.load()
+
+    if args.check:
+        return check(config)
 
     if args.write_config:
         ok = config.save()

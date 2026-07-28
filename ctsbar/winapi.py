@@ -139,6 +139,49 @@ def make_tool_window(hwnd: int) -> bool:
         return False
 
 
+def get_ex_style(hwnd: int) -> int:
+    if not IS_WINDOWS:
+        return 0
+    try:
+        return int(ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE))
+    except Exception:
+        return 0
+
+
+def set_ex_style(hwnd: int, style: int) -> bool:
+    if not IS_WINDOWS:
+        return False
+    try:
+        ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style)
+        ctypes.windll.user32.SetWindowPos(
+            hwnd, 0, 0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+        )
+        return True
+    except Exception:
+        return False
+
+
+def is_window_visible(hwnd: int) -> bool:
+    if not IS_WINDOWS:
+        return False
+    try:
+        return bool(ctypes.windll.user32.IsWindowVisible(hwnd))
+    except Exception:
+        return False
+
+
+def show_window(hwnd: int) -> bool:
+    """SW_SHOWNA: mostra sem ativar (nao rouba o foco de quem esta na frente)."""
+    if not IS_WINDOWS:
+        return False
+    try:
+        ctypes.windll.user32.ShowWindow(hwnd, 8)
+        return True
+    except Exception:
+        return False
+
+
 def set_topmost(hwnd: int) -> bool:
     """Recoloca a janela no topo da pilha, sem mover, redimensionar nem focar."""
     if not IS_WINDOWS:

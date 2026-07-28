@@ -29,9 +29,13 @@ from ..models import Level, State, UsageSnapshot, format_duration, level_for
 from ..winapi import (
     IS_WINDOWS,
     enable_dpi_awareness,
+    get_ex_style,
     is_topmost,
+    is_window_visible,
     make_tool_window,
+    set_ex_style,
     set_topmost,
+    show_window,
     work_area,
 )
 from .taskbar_embed import try_embed, undo_embed
@@ -114,7 +118,12 @@ class UsageBar:
         self.root.geometry(f"{self.width}x{self.height}+{int(x)}+{int(y)}")
 
     def _apply_window_styles(self) -> None:
-        """Estilos que so existem depois que a janela tem HWND."""
+        """Estilos que so existem depois que a janela tem HWND.
+
+        Nada aqui pode custar a visibilidade da barra: se a mudanca de estilo
+        esconder a janela, desfazemos e seguimos sem ela. Barra feia na frente
+        e melhor que barra bonita que nao aparece.
+        """
         if not IS_WINDOWS:
             return
         try:
@@ -122,7 +131,13 @@ class UsageBar:
         except Exception:
             return
 
-        make_tool_window(hwnd)
+        if self.config.get("bar.tool_window", True):
+            previous = get_ex_style(hwnd)
+            make_tool_window(hwnd)
+            if not is_window_visible(hwnd):
+                set_ex_style(hwnd, previous)
+                show_window(hwnd)
+                self._place_window()
 
         if self.config.get("taskbar_embed", False) and not self._embedded:
             self._embedded = try_embed(hwnd, self.width, self.height)
@@ -131,11 +146,15 @@ class UsageBar:
                 self._place_window()
 
     def show(self) -> None:
-        # Ordem importa: mexer no ex-style de uma janela ja mapeada derruba ela
-        # da faixa topmost. Estiliza primeiro, mapeia depois, topmost por ultimo.
-        self.root.update_idletasks()  # garante que o HWND ja exista
-        self._apply_window_styles()
+        # Mapear primeiro, estilizar depois. Estilizar uma janela ainda nao
+        # mapeada deixava ela invisivel. O topmost, que era o motivo de tentar
+        # a ordem inversa, quem garante e o _reassert_topmost periodico.
         self.root.deiconify()
+        self.root.update_idletasks()
+        try:
+            self._apply_window_styles()
+        except Exception:
+            pass  # sem estilos extras a barra ainda funciona
         self.root.attributes("-topmost", True)
         self._reassert_topmost()
         self.config.set("bar.visible", True)

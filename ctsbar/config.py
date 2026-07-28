@@ -29,6 +29,9 @@ DEFAULTS: Dict[str, Any] = {
         "show_text": True,
         "visible": True,
         "font_size": 8,
+        # Tira a barra do Alt+Tab e impede que ela roube foco. Se a janela nao
+        # aparecer, desligue isto: e o unico ajuste que mexe em estilo nativo.
+        "tool_window": True,
     },
     # Reparenting de verdade dentro do Shell_TrayWnd. Experimental: se falhar,
     # a barra volta sozinha pro modo flutuante.
