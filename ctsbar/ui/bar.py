@@ -245,7 +245,9 @@ class UsageBar:
             if snapshot.tokens:
                 return f"~{snapshot.tokens // 1000}k tok"
             return "sem sessao"
-        text = f"{int(snapshot.percent)}%"
+        # '~' avisa que o numero e do cache: quem olha a barra de relance nao
+        # ve o tooltip, e uso pelo claude.ai nao aparece nos transcripts.
+        text = f"{'~' if snapshot.is_stale else ''}{int(snapshot.percent)}%"
         remaining = snapshot.primary.seconds_to_reset() if snapshot.primary else None
         if remaining is not None:
             text += f"  {format_duration(remaining)}"

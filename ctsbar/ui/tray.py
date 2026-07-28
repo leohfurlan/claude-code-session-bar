@@ -137,7 +137,8 @@ class TrayIcon:
         if snapshot.has_percent and snapshot.primary is not None:
             remaining = snapshot.primary.seconds_to_reset()
             suffix = f" · {format_duration(remaining)}" if remaining is not None else ""
-            return f"{int(snapshot.percent)}% — {snapshot.primary.label}{suffix}"
+            prefixo = "~" if snapshot.is_stale else ""
+            return f"{prefixo}{int(snapshot.percent)}% — {snapshot.primary.label}{suffix}"
         if snapshot.tokens:
             return f"~{snapshot.tokens // 1000}k tokens na janela de 5h"
         return "Sem sessao ativa"

@@ -214,7 +214,7 @@ python -m ctsbar --write-config
   "api": {
     "enabled": true,
     "timeout_seconds": 6,
-    "interval_seconds": 300,      // de quanto em quanto tempo consultar a API
+    "interval_seconds": 120,      // de quanto em quanto tempo consultar a API
     "min_interval_seconds": 60    // piso ao antecipar por uso novo
   },
   "fallback": { "enabled": true, "token_budget": null },
@@ -250,22 +250,32 @@ falhar, a barra volta sozinha pro modo flutuante, que é o caminho confiável �
 A barra roda a cada 20 s, mas o `/api/oauth/usage` é **rate-limited** — consultar
 a cada ciclo devolve `HTTP 429` e nenhum dado. Então:
 
-- a API é consultada a cada **5 min** (`api.interval_seconds`);
+- a API é consultada a cada **2 min** (`api.interval_seconds`);
 - entre consultas a barra mostra o último percentual, com a **contagem
   regressiva correndo localmente** a cada segundo;
+- um valor que não é de agora aparece com **`~` na frente** (`~45%`), e a idade
+  exata fica no tooltip;
+- **Atualizar agora** (menu da bandeja, ou botão direito na barra) fura o
+  intervalo e consulta na hora;
 - quando os transcripts acusam **uso novo**, a consulta é antecipada,
-  respeitando um piso de 60 s — na prática, mexendo no Claude Code o número
-  atualiza a cada minuto;
+  respeitando um piso de 60 s;
 - se a API falhar, o recuo dobra a cada tentativa (até 30 min).
+
+> **Uso fora do Claude Code não é detectado localmente.** O claude.ai, o app de
+> desktop e o Cowork gastam a mesma cota, mas não geram transcript nenhum na sua
+> máquina. Para esse uso não há como antecipar a consulta — o número só atualiza
+> no ciclo de 2 min ou quando você pede **Atualizar agora**. É também por isso
+> que o cache tem teto curto: a premissa "sem transcript novo, o percentual não
+> mudou" vale para o Claude Code, não para os outros.
 
 O último percentual bom é gravado em `%APPDATA%\ctsbar\last-usage.json`, então
 **reiniciar o app não faz a barra voltar para contagem de tokens**. Ele continua
 valendo:
 
 - sempre, nos primeiros 10 min;
-- depois disso, enquanto os transcripts não acusarem uso novo — sem uso, o
-  percentual não teria como ter mudado;
-- no máximo 1 h, porque uso em outra máquina ou no claude.ai também conta.
+- depois disso, enquanto os transcripts não acusarem uso novo;
+- no máximo 30 min, porque uso no claude.ai ou em outra máquina também conta
+  e não aparece nos transcripts.
 
 Passado qualquer um desses limites, ou assim que a janela vira, o valor é
 descartado. A idade aparece no tooltip a partir de 90 s, para um número velho

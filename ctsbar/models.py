@@ -98,6 +98,17 @@ class UsageSnapshot:
     tokens: Optional[int] = None
     """Tokens ponderados da janela atual (so no modo fallback)."""
 
+    stale_seconds: Optional[float] = None
+    """Ha quanto tempo o valor foi lido, quando ele vem do cache.
+
+    Preenchido so quando o numero nao e de agora. A barra usa isso pra marcar
+    o percentual com '~', porque quem bate o olho na barra nao ve o tooltip.
+    """
+
+    @property
+    def is_stale(self) -> bool:
+        return self.stale_seconds is not None and self.stale_seconds >= 90
+
     @property
     def percent(self) -> Optional[float]:
         return self.primary.percent if self.primary else None

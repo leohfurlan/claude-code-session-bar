@@ -365,6 +365,52 @@ def test_falhas_seguidas_aumentam_o_recuo():
     assert monitor._api_interval() == 40
 
 
+def test_atualizar_agora_atravessa_o_intervalo():
+    """Sem isto o botao so acorda o loop, que serve o cache de novo."""
+    fake = _FakeApi(45.0, 50.0)
+    monitor = _monitor_com_api(fake, interval_seconds=3600)
+
+    assert monitor.poll().percent == 45.0
+    assert monitor.poll().percent == 45.0  # trava do intervalo: cache
+    assert fake.chamadas == 1
+
+    monitor.refresh_now()
+    monitor._last_api_attempt = time.time() - 10  # passa o piso curto
+    assert monitor.poll().percent == 50.0
+    assert fake.chamadas == 2
+
+
+def test_atualizar_agora_zera_o_recuo_acumulado():
+    monitor = _monitor_com_api(_FakeApi("erro"), interval_seconds=10)
+    monitor.poll()
+    assert monitor._api_failures == 1
+
+    monitor.refresh_now()
+    assert monitor._api_failures == 0
+    assert monitor._force_api is True
+
+
+def test_valor_do_cache_vem_marcado_como_velho():
+    """A barra mostra '~' — quem olha de relance nao ve o tooltip."""
+    from ctsbar.models import UsageSnapshot
+
+    monitor = _monitor_com_api(_FakeApi())
+    monitor._last_api = UsageSnapshot(
+        state=State.OK,
+        source="api",
+        primary=LimitWindow("five_hour", 45.0, resets_at=time.time() + 3600),
+        captured_at=time.time() - 240,
+    )
+    cached = monitor._cached_api(time.time(), None)
+    assert cached.is_stale
+    assert cached.stale_seconds >= 240
+
+    # Valor recem lido da API nao e marcado.
+    fresh = _monitor_com_api(_FakeApi(50.0)).poll()
+    assert not fresh.is_stale
+    assert fresh.stale_seconds is None
+
+
 def test_o_recuo_precisa_de_fato_recuar():
     """Com o teto igual ao intervalo base, o recuo seria um no-op."""
     from ctsbar.monitor import API_MAX_BACKOFF

@@ -22,13 +22,18 @@ from .sources import ApiUsageSource, TranscriptUsageSource
 API_CACHE_SOFT_AGE = 10 * 60
 
 # Depois disso ele so continua valendo enquanto os transcripts locais nao
-# acusarem uso novo — sem uso, `utilization` nao teria como ter mudado. O teto
-# duro existe porque uso em outra maquina ou no claude.ai tambem conta.
-API_CACHE_HARD_AGE = 60 * 60
+# acusarem uso novo. Cuidado: essa premissa vale pro Claude Code, mas nao pro
+# claude.ai / app de desktop, que gastam a mesma cota sem gerar transcript. Por
+# isso o teto duro e curto, e o valor vem marcado com a propria idade.
+API_CACHE_HARD_AGE = 30 * 60
 
 # Teto do recuo entre tentativas. Precisa ser bem maior que
 # api.interval_seconds, senao o recuo nao recua nada.
 API_MAX_BACKOFF = 30 * 60
+
+# Piso entre consultas forcadas pelo usuario, so pra apertar o botao varias
+# vezes seguidas nao virar uma rajada.
+FORCED_REFRESH_FLOOR = 5
 
 
 class UsageMonitor:
@@ -45,6 +50,7 @@ class UsageMonitor:
         self._api_failures = 0
         self._last_activity: Optional[int] = None
         self._activity_at_capture: Optional[int] = None
+        self._force_api = False
         self._lock = threading.Lock()
         self._load_last_api()
         self._wake = threading.Event()
@@ -70,7 +76,14 @@ class UsageMonitor:
         self._wake.set()
 
     def refresh_now(self) -> None:
-        """Forca um ciclo imediato (usado pelo menu 'Atualizar agora')."""
+        """Forca uma consulta a API agora ('Atualizar agora' / botao direito).
+
+        Acordar o loop nao basta: o ciclo seguinte bateria na trava de
+        intervalo e serviria o cache de novo. Pedido explicito do usuario
+        atravessa a trava e zera o recuo acumulado.
+        """
+        self._force_api = True
+        self._api_failures = 0
         self._wake.set()
 
     def _loop(self) -> None:
@@ -121,6 +134,10 @@ class UsageMonitor:
             return True  # primeira leitura
 
         elapsed = now - self._last_api_attempt
+        # Pedido manual atravessa o intervalo; o piso curto so evita que
+        # apertar o botao varias vezes seguidas vire uma rajada.
+        if self._force_api and elapsed >= FORCED_REFRESH_FLOOR:
+            return True
         if elapsed >= self._api_interval():
             return True
 
@@ -153,7 +170,7 @@ class UsageMonitor:
         if age >= 90:
             suffix = f"valor de {format_duration(age)} atras"
             detail = f"{detail} · {suffix}" if detail else suffix
-        return replace(cached, detail=detail)
+        return replace(cached, detail=detail, stale_seconds=age)
 
     # ------------------------------------------------------- cache em disco
 
@@ -237,6 +254,7 @@ class UsageMonitor:
 
         if self._api.enabled and self._should_call_api(now, new_activity):
             self._last_api_attempt = now
+            self._force_api = False
             snapshot = self._api.read()
             if snapshot.state is State.OK and snapshot.primary is not None:
                 self._api_failures = 0
